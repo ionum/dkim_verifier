@@ -718,6 +718,10 @@ DKIM_Verifier.DKIMVerifier = (function() {
 		// for some reason /(\r\n)*$/ doesn't work all the time (matching only last "\r\n")
 		body = body.replace(/((\r\n)+)?$/,"\r\n");
 		
+		// If only one \r\n rests, there were only emtpy lines.
+		if (body == "\r\n"){
+			return "";
+		}
 		return body;
 	}
 
