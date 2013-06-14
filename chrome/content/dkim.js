@@ -4,7 +4,7 @@
  * Verifies the DKIM-Signatures as specified in RFC 6376
  * http://tools.ietf.org/html/rfc6376
  *
- * version: 0.4.1pre1 (11 June 2013)
+ * version: 0.4.1pre1 (13 June 2013)
  *
  * Copyright (c) 2013 Philippe Lieser
  *
@@ -53,7 +53,7 @@
  */
  
 // options for JSHint
-/* global Components, messenger, msgWindow, Application, gMessageListeners, gDBView, Services */ 
+/* global Components, messenger, msgWindow, Application, gMessageListeners, gDBView, Services, gFolderDisplay */ 
 
 // namespace
 var DKIM_Verifier = {};
@@ -250,16 +250,20 @@ DKIM_Verifier.DKIMVerifier = (function() {
 			},
 			
 			onStopRequest: function (/* aRequest , aContext , aStatusCode */) {
-				// dkimDebugMsg("onStopRequest");
-				
-				// if end of msg is reached before end of header,
-				// it is no in correct e-mail format
-				if (!this.headerFinished) {
-					throw new DKIM_InternalError("Message is not in correct e-mail format",
-						"INCORRECT_EMAIL_FORMAT");
-				}
+				try {
+					// dkimDebugMsg("onStopRequest");
+					
+					// if end of msg is reached before end of header,
+					// it is no in correct e-mail format
+					if (!this.headerFinished) {
+						throw new DKIM_InternalError("Message is not in correct e-mail format",
+							"INCORRECT_EMAIL_FORMAT");
+					}
 
-				verifyBegin(this.msg);
+					verifyBegin(this.msg);
+				} catch (e) {
+					handleExeption(e);
+				}
 			}
 		};
 
@@ -703,11 +707,6 @@ DKIM_Verifier.DKIMVerifier = (function() {
 	 * specified in Section 3.4.4 of RFC 6376
 	 */
 	function canonicalizationBodyRelaxed(body) {
-		// no change for empty body
-		if (body === "") {
-			return body;
-		} 
-		
 		// Ignore all whitespace at the end of lines
 		body = body.replace(/[ \t]+\r\n/g,"\r\n");
 		// Reduce all sequences of WSP within a line to a single SP character
@@ -718,11 +717,12 @@ DKIM_Verifier.DKIMVerifier = (function() {
 		// for some reason /(\r\n)*$/ doesn't work all the time (matching only last "\r\n")
 		body = body.replace(/((\r\n)+)?$/,"\r\n");
 		
-		// If only one \r\n rests, there were only emtpy lines.
-		if (body == "\r\n"){
+		// If only one \r\n rests, there were only emtpy lines or body was empty.
+		if (body === "\r\n") {
 			return "";
+		} else {
+			return body;
 		}
-		return body;
 	}
 
 	/*
@@ -829,6 +829,40 @@ DKIM_Verifier.DKIMVerifier = (function() {
 	}
 	
 	/*
+	 * highlight header
+	 */
+	function highlightHeader(status) {
+		function highlightEmailAddresses(headerBox) {
+			if (status !== "clearHeader") {
+			headerBox.emailAddresses.style.borderRadius = "3px";
+			headerBox.emailAddresses.style.color = prefs.
+				getCharPref("color."+status+".text");
+			headerBox.emailAddresses.style.backgroundColor = prefs.
+				getCharPref("color."+status+".background");
+			} else {
+				headerBox.emailAddresses.style.color = "";
+				headerBox.emailAddresses.style.backgroundColor = "";
+			}
+		}
+		
+		// highlight or reset header
+		if (prefs.getBoolPref("colorFrom") || status === "clearHeader") {
+			var expandedfromBox = document.getElementById("expandedfromBox");
+			highlightEmailAddresses(expandedfromBox);
+
+			// for CompactHeader addon
+			var collapsed1LfromBox = document.getElementById("CompactHeader_collapsed1LfromBox");
+			if (collapsed1LfromBox) {
+				highlightEmailAddresses(collapsed1LfromBox);
+			}
+			var collapsed2LfromBox = document.getElementById("CompactHeader_collapsed2LfromBox");
+			if (collapsed1LfromBox) {
+				highlightEmailAddresses(collapsed2LfromBox);
+			}
+		}
+	}
+
+	/*
 	 * handeles Exeption
 	 */
 	function handleExeption(e) {
@@ -844,14 +878,7 @@ DKIM_Verifier.DKIMVerifier = (function() {
 			dkimMsgHdrRes.value = DKIM_Verifier.DKIM_STRINGS.PERMFAIL + " (" + e.message + ")";
 			
 			// highlight from header
-			if (prefs.getBoolPref("colorFrom")) {
-				var expandedfromBox = document.getElementById("expandedfromBox");
-				expandedfromBox.emailAddresses.style.borderRadius = "3px";
-				expandedfromBox.emailAddresses.style.color = prefs.
-					getCharPref("color.permfail.text");
-				expandedfromBox.emailAddresses.style.backgroundColor = prefs.
-					getCharPref("color.permfail.background");
-			}
+			highlightHeader("permfail");
 		} else if (e instanceof DKIM_InternalError) {
 			if (e.errorType === "INCORRECT_EMAIL_FORMAT") {
 				dkimMsgHdrRes.value = DKIM_Verifier.DKIM_STRINGS.NOT_EMAIL;
@@ -881,14 +908,7 @@ DKIM_Verifier.DKIMVerifier = (function() {
 				dkimMsgHdrRes.value = DKIM_Verifier.DKIM_STRINGS.NOSIG;
 
 				// highlight from header
-				if (prefs.getBoolPref("colorFrom")) {
-					var expandedfromBox = document.getElementById("expandedfromBox");
-					expandedfromBox.emailAddresses.style.borderRadius = "3px";
-					expandedfromBox.emailAddresses.style.color = prefs.
-						getCharPref("color.nosig.text");
-					expandedfromBox.emailAddresses.style.backgroundColor = prefs.
-						getCharPref("color.nosig.background");
-				}
+				highlightHeader("nosig");
 				
 				// no signature to check, return
 				return;
@@ -899,7 +919,6 @@ DKIM_Verifier.DKIMVerifier = (function() {
 			dkimVerifierBox.collapsed = false;
 			
 			verifySignaturePart1(msg);
-			
 		} catch(e) {
 			handleExeption(e);
 		}
@@ -1083,20 +1102,10 @@ DKIM_Verifier.DKIMVerifier = (function() {
 			}
 			
 			// highlight from header
-			if (prefs.getBoolPref("colorFrom")) {
-				var expandedfromBox = document.getElementById("expandedfromBox");
-				expandedfromBox.emailAddresses.style.borderRadius = "3px";
-				if (msg.warnings.length === 0) {
-					expandedfromBox.emailAddresses.style.color = prefs.
-						getCharPref("color.success.text");
-					expandedfromBox.emailAddresses.style.backgroundColor = prefs.
-						getCharPref("color.success.background");
-				} else {
-					expandedfromBox.emailAddresses.style.color = prefs.
-						getCharPref("color.warning.text");
-					expandedfromBox.emailAddresses.style.backgroundColor = prefs.
-						getCharPref("color.warning.background");
-				}
+			if (msg.warnings.length === 0) {
+				highlightHeader("success");
+			} else {
+				highlightHeader("warning");
 			}
 		} catch(e) {
 			handleExeption(e);
@@ -1220,14 +1229,13 @@ var that = {
 	/*
 	 * gets called if a new message ist viewed
 	 */
-	messageLoaded : function () {	
+	messageLoaded : function () {
 		try {
 			// get msg uri
 			var msgURI = gDBView.URIForFirstSelectedMessage ;
 			
-			// return if msg is in RSS folder
-			var messageService = messenger.messageServiceFromURI(msgURI);
-			if (messageService.messageURIToMsgHdr(msgURI).folder.server.type === "rss") {
+			// return if msg is RSS feed or news
+			if (gFolderDisplay.selectedMessageIsFeed || gFolderDisplay.selectedMessageIsNews) {
 				var dkimMsgHdrRes = document.getElementById("dkim_verifier_msgHdrRes");
 				dkimMsgHdrRes.value = DKIM_Verifier.DKIM_STRINGS.NOT_EMAIL;
 
@@ -1262,9 +1270,7 @@ var that = {
 		}
 
 		// reset highlight from header
-		var expandedfromBox = document.getElementById("expandedfromBox");
-		expandedfromBox.emailAddresses.style.color = "";
-		expandedfromBox.emailAddresses.style.backgroundColor = "";
+		highlightHeader("clearHeader");
 	},
 	
 	/*
